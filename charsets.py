@@ -3,6 +3,10 @@
 # Program to print single-byte characters using different character encodings.
 # This program also illustrates how to use Python's decode() method.
 
+import codecs
+import sys
+import unicodedata
+
 CHAR_FROM = 0
 CHAR_TO = 255
 
@@ -61,34 +65,110 @@ cp437 = {
         b'\x0E': u'\u266B',
         }
 
+
 def filter_printable(chars):
     return map(
             lambda c: c if c.isprintable() else '❌',
             chars)
 
-def decode(b, charset):
+
+def decode(b, charset, errors='replace'):
     if charset == '437':
         # Special decoding needed because of
         # https://stackoverflow.com/a/46942819
         return decode_cp437(b)
     else:
-        return b.decode(encoding=charset,errors='replace')
+        return b.decode(encoding=charset,errors=errors)
 
-def decode_cp437(b):
+
+# Special decoding function for CP437 that uses the original IBM PC characters
+# at the control code positions.
+def decode_cp437(b, errors='replace'):
     if b in cp437:
         return cp437[b]
     else:
-        return b.decode(encoding='437',errors='replace')
+        return b.decode(encoding='437',errors=errors)
 
 
-print("\t".join(['Byte'] + list(charsets.keys())))
-for x in range(CHAR_FROM, CHAR_TO + 1):
-    # First convert the integer to a corresponding (single) byte sequence.
-    b = x.to_bytes(1, 'little')
-    # For each specified charset, we convert the byte to a (single-character)
-    # string by decoding using that specific charset.
-    decoded = map(
-            lambda i: 'DEL' if x == 127 else decode(b,charsets[i]), charsets.keys()
-            )
-    # Print nicely the character from each charset
-    print("\t".join(["{}".format(hex(x))] + list(filter_printable(decoded))))
+# From https://stackoverflow.com/a/630974.
+def exists_encoding(enc):
+    try:
+        codecs.lookup(enc)
+    except LookupError:
+        return False
+    return True
+
+
+# For each byte between CHAR_FROM and CHAR_TO, prints the glyph for each charset
+# defined above in the `charsets` dictionary.
+def print_summary():
+    print("\t".join(['Byte'] + list(charsets.keys())))
+    for x in range(CHAR_FROM, CHAR_TO + 1):
+        # First convert the integer to a corresponding (single) byte sequence.
+        b = x.to_bytes(1, 'little')
+        # For each specified charset, we convert the byte to a (single-character)
+        # string by decoding using that specific charset.
+        decoded = map(
+                lambda i: 'DEL' if x == 127 else decode(b,charsets[i]), charsets.keys()
+                )
+        # Print nicely the character from each charset
+        print("\t".join(["{}".format(hex(x))] + list(filter_printable(decoded))))
+
+
+# For a given charset, prints the glyph, ord, unicode category and unicode name
+# for each encoded byte between CHAR_FROM and CHAR_TO.
+def print_charset(args):
+    if len(args) == 0:
+        usage()
+        sys.exit(1)
+    charset = args.pop(0)
+    if not exists_encoding(charset):
+        print("Charset {} is not valid.".format(charset))
+        return
+    
+    print("\t".join(["Byte", "Glyph", "Ord", "Cat", "Name"]))
+    for x in range(CHAR_FROM, CHAR_TO + 1):
+        b = x.to_bytes(1, 'little')
+        try:
+            c = decode(b, charset, 'strict')
+            print("\t".join([hex(x),
+                             c if c.isprintable() else "❌",
+                             "%d" % ord(c),
+                             unicodedata.category(c),
+                             unicodedata.name(c, "(unknown)")
+                             ]))
+        except UnicodeDecodeError:
+            print("\t".join([hex(x), "(invalid encoding)"]))
+
+
+
+def usage():
+    print("""Usage:
+
+    charsets <cmd>
+
+    Commands:
+        summary     Print a summary of all charsets.
+        charset <charset>
+                    Print information for a specific charset.
+    """)
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 0:
+        usage()
+        sys.exit(1)
+
+    cmd = args.pop(0)
+
+    if cmd == "summary":
+        print_summary()
+    elif cmd == "charset":
+        print_charset(args)
+    else:
+        print("Invalid command: {}".format(cmd))
+        usage()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
